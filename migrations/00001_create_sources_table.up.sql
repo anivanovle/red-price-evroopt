@@ -1,0 +1,23 @@
+DROP TABLE IF EXISTS products CASCADE;
+DROP TABLE IF EXISTS sources CASCADE;
+
+
+
+
+CREATE TABLE IF NOT EXISTS sources (
+    id SERIAL PRIMARY KEY,
+    link VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    amount VARCHAR(255) NOT NULL,
+    price BIGINT NOT NULL,
+    discount VARCHAR(10) NOT NULL,
+    fullprice BIGINT NOT NULL,
+    category_title VARCHAR(255) NOT NULL,
+    source_link VARCHAR(255) NOT NULL,
+    date_until TIMESTAMP NOT NULL
+);

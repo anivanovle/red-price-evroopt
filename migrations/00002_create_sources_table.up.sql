@@ -1,0 +1,2 @@
+ALTER TABLE products
+ALTER COLUMN amount TYPE VARCHAR(255);
