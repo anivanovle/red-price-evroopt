@@ -27,10 +27,10 @@ func main() {
 	ticker := Ticker()
 
 	ctx := context.Background()
-
+	// Вот тут непоняно ты хочешь чтобы я вообще не выходил из приложения или как его тогда правильно класть
 	if err := StartBot(ctx, c, ticker.C); err != nil {
 		c.Logger.Info("Bot fell")
-		return
+		log.Fatal("Bot upal")
 	}
 
 	for {
@@ -39,6 +39,7 @@ func main() {
 			ticker.Reset(Diff())
 			if err := StartBot(ctx, c, ticker.C); err != nil {
 				c.Logger.Info("Upal restart 3...2...1..")
+				log.Fatal("Bot upal")
 			}
 		case <-ctx.Done():
 			c.Logger.Info("Upal...")

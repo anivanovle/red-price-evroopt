@@ -82,11 +82,12 @@ func (p *Parser) workerTCP(ctx context.Context, sourceChan <-chan string, produc
 				p.logger.Info("finish pool worker TCP")
 				return
 			} else {
+				p.logger.Info("work with link", "link", source)
 				body, err := Html(source)
 				if err != nil {
 					p.logger.Error("failed to get html for parsing", "error", err)
 				}
-				err = parseProduct(body, productChan, source)
+				err = p.parseProduct(body, productChan, source)
 				if err != nil {
 					p.logger.Error("failed to parse products", "error", err)
 				}
@@ -110,14 +111,14 @@ func (p *Parser) workerDB(ctx context.Context, productChan <-chan Product, sourc
 				p.logger.Info("finish pool worker DB")
 				return
 			} else {
-				c, err := sources.Category(context.Background(), pr.SourceLink)
+				c, err := sources.Category(ctx, pr.SourceLink)
 				if err != nil {
 					p.logger.Error("failed to get category", "error", err)
 					continue
 				}
 				p.logger.Info("get category", "category", c)
 				pr.CategoryTitle = c
-				err = products.Save(context.Background(), pr.modelToStore())
+				err = products.Save(ctx, pr.modelToStore())
 				if err != nil {
 					p.logger.Error("failed to save product in db", "error", err)
 					continue
@@ -152,38 +153,46 @@ func Html(url string) ([]byte, error) {
 	return body, nil
 }
 
-func parseProduct(body []byte, productChan chan<- Product, source string) error {
+func (p *Parser) parseProduct(body []byte, productChan chan<- Product, source string) error {
 	var product Product
+	p.logger.Info("Parse products by source", "source", source)
 	product.SourceLink = source
 	r := bytes.NewReader(body)
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
+		p.logger.Error("failed get doc for parsing", "error", err)
 		return err
 	}
 
 	doc.Find("article[class^='Promotion_product']").Each(func(i int, s *goquery.Selection) {
 		title, amount, err := TitleAndAmount(s)
 		if err != nil {
+			p.logger.Error("failed get title and amount", "error", err)
 			return
+
 		}
 
 		price, err := Price(s)
 		if err != nil {
+			p.logger.Error("failed get price", "error", err)
 			return
 		}
 
 		fullPrice, err := FullPrice(s)
 		if err != nil {
+			p.logger.Error("failed get fullprice", "error", err)
 			return
 		}
 
 		date, err := Date(s)
 		if err != nil {
+			p.logger.Error("failed get date", "error", err)
 			return
 		}
 
 		discount, err := Discount(s)
 		if err != nil {
+			p.logger.Error("failed get discount", "error", err)
 			return
 		}
 		product = Product{
