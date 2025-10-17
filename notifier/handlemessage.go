@@ -127,7 +127,6 @@ func (n *Notifier) ProductsByCategory(ctx context.Context, message tgbotapi.Mess
 }
 
 func formatProduct(p *Product) (string, error) {
-
 	titleEmoji := "🛒"
 	priceEmoji := "💰"
 	discountEmoji := "🔥"
@@ -135,16 +134,51 @@ func formatProduct(p *Product) (string, error) {
 	categoryEmoji := "🏷️"
 	dateEmoji := "📅"
 
+	var fullPriceStr string
+	if p.Fullprice != 0 {
+		fullPriceStr = strconv.FormatFloat(p.Fullprice, 'f', 2, 64) + " BYN"
+	}
+
+	var discountLine string
+	if p.Discount != "" {
+		discountLine = fmt.Sprintf(
+			"\n%s %s",
+			discountEmoji,
+			tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Скидка: "+p.Discount),
+		)
+	}
+
+	var amountLine string
+	if p.Amount != "" {
+		amountLine = fmt.Sprintf(
+			"%s %s",
+			amountEmoji,
+			tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Количество: "+p.Amount),
+		)
+	}
+
 	text := fmt.Sprintf(
-		"%s *%s*\n%s %v BYN ~%vBYN~\n%s %s\n%s %s\n%s %s\n%s %s",
-		titleEmoji, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, p.Title),
-		priceEmoji, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Стоимость: "+strconv.FormatFloat(p.Price, 'f', 2, 64)),
-		tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, strconv.FormatFloat(p.Fullprice, 'f', 2, 64)),
-		discountEmoji, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Скидка:  "+p.Discount),
-		amountEmoji, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Количество: "+p.Amount),
-		categoryEmoji, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Категория: "+p.CatheghoryTitle),
-		dateEmoji, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Акция действует по: "+p.Date.Format("02.01.2006")),
+		"%s *%s*\n%s %s BYN ~%s~\n%s %s\n%s %s",
+		titleEmoji,
+		tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, p.Title),
+		priceEmoji,
+		tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, strconv.FormatFloat(p.Price, 'f', 2, 64)),
+		tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, fullPriceStr),
+		categoryEmoji,
+		tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Категория: "+p.CatheghoryTitle),
+		dateEmoji,
+		tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "Акция действует по: "+p.Date.Format("02.01.2006")),
 	)
+
+	if discountLine != "" {
+		if amountLine != "" {
+			text += discountLine + "\n" + amountLine
+		} else {
+			text += discountLine
+		}
+	} else if amountLine != "" {
+		text += "\n" + amountLine
+	}
 
 	return text, nil
 }

@@ -180,8 +180,8 @@ func (p *Parser) parseProduct(body []byte, productChan chan<- Product, source st
 
 		fullPrice, err := FullPrice(s)
 		if err != nil {
-			p.logger.Error("failed get fullprice", "error", err)
-			return
+			p.logger.Error("failed get fullprice", "error", err, "title", title)
+			fullPrice = 0
 		}
 
 		date, err := Date(s)
@@ -235,10 +235,10 @@ func FullPrice(s *goquery.Selection) (int, error) {
 	text := s.Find("span[class^='price_discountPrice']").Text()
 	text = strings.ReplaceAll(text, ",", ".")
 	f, err := strconv.ParseFloat(text, 64)
-	i := int64(f * 100)
 	if err != nil {
 		return 0, err
 	}
+	i := int64(f * 100)
 	return int(i), nil
 }
 
