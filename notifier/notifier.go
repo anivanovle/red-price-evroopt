@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	tgbotAPI "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"parser1.0/store"
 )
+
+const UpdateTimeOut = 30
 
 type Product struct {
 	Id              int
@@ -39,6 +42,7 @@ type Notifier struct {
 	Sources       Sources
 	CategoriesMap map[string]struct{}
 	logger        *slog.Logger
+	mu            sync.RWMutex
 }
 
 func NewNotifier(products Products, sources Sources, bot *tgbotAPI.BotAPI, logger *slog.Logger) *Notifier {
@@ -50,11 +54,11 @@ func NewNotifier(products Products, sources Sources, bot *tgbotAPI.BotAPI, logge
 		logger:        logger,
 	}
 }
-func (n *Notifier) Run() error {
+func (n *Notifier) Run(ctx context.Context) error {
 	n.logger.Info("Start notifier.Run")
 	n.Bot.Debug = true
 	updateConfig := tgbotAPI.NewUpdate(0)
-	updateConfig.Timeout = 30
+	updateConfig.Timeout = UpdateTimeOut
 	updates := n.Bot.GetUpdatesChan(updateConfig)
 
 	n.logger.Info("get categories")
@@ -70,24 +74,35 @@ func (n *Notifier) Run() error {
 		n.CategoriesMap[c] = struct{}{}
 	}
 
-	markup := n.BoardFromCategory(c)
-
-	for update := range updates {
-		n.logger.Info("receive messages")
-		if update.Message != nil {
-			if update.Message.Text == "/start" {
-				n.SendKeyBoard(update.FromChat().ID, markup) // кнопки отправил
+	for {
+		select {
+		case <-ctx.Done():
+			n.logger.Info("notifier stopped by context cancel")
+			return nil
+		case u, ok := <-updates:
+			if !ok {
+				n.logger.Info("chan with updates closed notifier stops")
+				return nil
+			} else {
+				n.logger.Info("receive messages")
+				if u.Message != nil {
+					markup := n.BoardFromCategory(c)
+					if u.Message.Text == "/start" {
+						n.SendKeyBoard(u.FromChat().ID, markup) // кнопки отправил
+					}
+					/*Вынес в отдельную горутину но не знаю по идее у нас тут может быть и работа с бд и вычисления
+					как в таком случае правильно делается асинхронност?*/
+					go func(up *tgbotAPI.Update) {
+						ctxMessage, cancel := context.WithTimeout(ctx, 10*time.Second)
+						defer cancel()
+						n.HandleMessage(ctxMessage, up.Message, markup)
+					}(&u)
+				}
 			}
-			/*Вынес в отдельную горутину но не знаю по идее у нас тут может быть и работа с бд и вычисления
-			как в таком случае правильно делается асинхронност?*/
-			go func(up tgbotAPI.Update) {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				n.HandleMessage(ctx, *update.Message)
-			}(update)
+
 		}
+
 	}
-	return nil
 
 }
 

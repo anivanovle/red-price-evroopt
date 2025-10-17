@@ -3,7 +3,6 @@ package parser
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -16,19 +15,21 @@ import (
 	"parser1.0/store"
 )
 
+const LengthOfTheProductChannel = 10
+
 // Парсинг продуктов по источникам полученным в InitSources()
 
-func (p *Parser) Run() error {
-	p.logger.Info("Start Parser.Run")
+func (p *Parser) ParsingProducts(ctx context.Context) error {
+	p.logger.Info("Start parser.ParsingProducts")
 
-	sources, err := p.Sources.Sources(context.Background())
+	sources, err := p.Sources.Sources(ctx)
 	if err != nil {
 		p.logger.Error("failed to get sources", "error", err)
 		return err
 	}
 
 	sourceChan := make(chan string, len(sources))
-	productChan := make(chan Product, 10)
+	productChan := make(chan Product, LengthOfTheProductChannel)
 	for _, source := range sources {
 		sourceChan <- source.Link
 	}
@@ -38,19 +39,30 @@ func (p *Parser) Run() error {
 	for i := 0; i < p.PoolTCPCount; i++ {
 		wgTCP.Add(1)
 		p.logger.Info("Add worker in TCP pool")
-		go p.workerTCP(sourceChan, productChan, &wgTCP)
+		go p.workerTCP(ctx, sourceChan, productChan, &wgTCP)
 	}
 
-	go func() {
-		wgTCP.Wait()
-		close(productChan)
-	}() //Отдельная горутина ждет пока последний обработчик из пула TCP положит полученнй продукт в productChan и закрывает его
+	go func(ctx context.Context) { //Выгялядит страшно, но если надо в каждую горутину передавать контекст, умнее ничего не придумал
+		done := make(chan struct{})
+		go func() {
+			wgTCP.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			close(productChan)
+		}
+
+	}(ctx) //Отдельная горутина ждет пока последний обработчик из пула TCP положит полученнй продукт в productChan и закрывает его
 
 	var wgDB sync.WaitGroup
 	for i := 0; i < p.PoolPostgresCount; i++ {
 		wgDB.Add(1)
 		p.logger.Info("Add worker in DB pool")
-		go p.workerDB(productChan, p.Sources, p.Products, &wgDB)
+		go p.workerDB(ctx, productChan, p.Sources, p.Products, &wgDB)
 	}
 
 	wgDB.Wait()
@@ -58,41 +70,62 @@ func (p *Parser) Run() error {
 	return nil
 }
 
-func (p *Parser) workerTCP(sourceChan <-chan string, productChan chan<- Product, wg *sync.WaitGroup) {
+func (p *Parser) workerTCP(ctx context.Context, sourceChan <-chan string, productChan chan<- Product, wg *sync.WaitGroup) {
 	p.logger.Info("start worker TCP")
 	defer wg.Done()
-	for source := range sourceChan {
-		body, err := Html(source)
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-		err = parseProduct(body, productChan, source)
-		if err != nil {
-			continue
+	for {
+		select {
+		case <-ctx.Done():
+			p.logger.Info("worker TCP stopped by context cancel")
+		case source, ok := <-sourceChan:
+			if !ok {
+				p.logger.Info("finish pool worker TCP")
+				return
+			} else {
+				body, err := Html(source)
+				if err != nil {
+					p.logger.Error("failed to get html for parsing", "error", err)
+				}
+				err = parseProduct(body, productChan, source)
+				if err != nil {
+					p.logger.Error("failed to parse products", "error", err)
+				}
+			}
 		}
 	}
-
-	p.logger.Info("finish worker TCP")
 
 }
 
-func (p *Parser) workerDB(productChan <-chan Product, sources Sources, products Products, wg *sync.WaitGroup) {
+func (p *Parser) workerDB(ctx context.Context, productChan <-chan Product, sources Sources, products Products, wg *sync.WaitGroup) {
 	p.logger.Info("start DB worker")
 	defer wg.Done()
-	for product := range productChan {
-		c, err := sources.Category(context.Background(), product.SourceLink)
-		if err != nil {
-			p.logger.Error("failed to get category", "error", err)
+
+	for {
+		select {
+		case <-ctx.Done():
+			p.logger.Info("worker TCP stopped by context cancel")
+			return
+		case pr, ok := <-productChan:
+			if !ok {
+				p.logger.Info("finish pool worker DB")
+				return
+			} else {
+				c, err := sources.Category(context.Background(), pr.SourceLink)
+				if err != nil {
+					p.logger.Error("failed to get category", "error", err)
+					continue
+				}
+				p.logger.Info("get category", "category", c)
+				pr.CategoryTitle = c
+				err = products.Save(context.Background(), pr.modelToStore())
+				if err != nil {
+					p.logger.Error("failed to save product in db", "error", err)
+					continue
+				}
+			}
 		}
-		p.logger.Info("get category", "category", c)
-		product.CategoryTitle = c
-		err = products.Save(context.Background(), product.modelToStore())
-		if err != nil {
-			p.logger.Error("failed to save product in db", "error", err)
-		}
+
 	}
-	p.logger.Info("finish worker TCP")
 }
 
 func Html(url string) ([]byte, error) {

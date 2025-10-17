@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
-	"log/slog"
 	"os"
 	"time"
 
@@ -21,60 +21,97 @@ func main() {
 	c := config.MustConfig()
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		RunMigrations(c)
-
-		os.Exit(1)
+		return
 	}
-	go scheduleRestart(c.Logger)
+
+	ticker := Ticker()
+
+	ctx := context.Background()
+
+	if err := StartBot(ctx, c, ticker.C); err != nil {
+		c.Logger.Info("Bot fell")
+		return
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			ticker.Reset(Diff())
+			if err := StartBot(ctx, c, ticker.C); err != nil {
+				c.Logger.Info("Upal restart 3...2...1..")
+			}
+		case <-ctx.Done():
+			c.Logger.Info("Upal...")
+			return
+		}
+	}
+
+}
+
+func StartBot(ctx context.Context, c *config.Config, tick <-chan time.Time) error {
 	store, err := store.NewStore(c.DbUrl)
 	if err != nil {
 		c.Logger.Error("failed to create store obj:", "error", err)
-
-		os.Exit(1)
+		return err
 	}
 	defer store.Close()
+
+	if err := store.ClearDB(); err != nil {
+		c.Logger.Error("failed to clear db:", "error", err)
+		return err
+	}
 
 	bot, err := tgbotapi.NewBotAPI(c.BotToken)
 	if err != nil {
 		c.Logger.Error("failed to create tgbot obj:", "error", err)
-
-		os.Exit(1)
+		return err
 	}
 	p, err := parser.NewParser(store.Sources, store.Products, c.Logger)
 
 	if err != nil {
 		c.Logger.Error("failed to create parser obj:", "error", err)
-
-		os.Exit(1)
+		return err
 	}
-	if err := p.InitSources(); err != nil {
+	if err := p.InitSources(ctx); err != nil {
 		c.Logger.Error("failed to init sources:", "error", err)
-
-		os.Exit(1)
+		return err
 	}
-	if err := p.Run(); err != nil {
+	if err := p.ParsingProducts(context.Background()); err != nil {
 		c.Logger.Error("failed to parse products:", "error", err)
 
-		return
+		return err
 	}
 	n := notifier.NewNotifier(store.Products, store.Sources, bot, c.Logger)
-	if err := n.Run(); err != nil {
-		c.Logger.Error("failed in notifier component:", "error", err)
 
-		os.Exit(1)
+	go func() {
+		if err := n.Run(ctx); err != nil {
+			c.Logger.Error("failed in notifier component:", "error", err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		c.Logger.Info("Context is canceled app stops")
+		return err
+	case <-tick:
+		c.Logger.Info("Middnight, bot restarted")
+		return nil
 	}
 
 }
 
-func scheduleRestart(logger *slog.Logger) {
-	for {
-		now := time.Now()
-		next := now.Add(24 * time.Hour).Truncate(24 * time.Hour)
-		diff := next.Sub(now)
+func Ticker() time.Ticker {
+	duration := Diff()
+	timer := time.NewTicker(duration)
 
-		time.Sleep(diff)
-		logger.Info("bot finishes work and restarting")
-		os.Exit(0)
-	}
+	return *timer
+}
+
+func Diff() time.Duration {
+	now := time.Now()
+	next := now.Add(24 * time.Hour).Truncate(24 * time.Hour)
+	diff := next.Sub(now)
+	return diff
 }
 
 func RunMigrations(c *config.Config) {

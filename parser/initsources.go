@@ -10,13 +10,15 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+const ClickTimeOut = 5
+
 // Получение категории и ссылки источников
 
-func (p *Parser) InitSources() error {
+func (p *Parser) InitSources(ctx context.Context) error {
 
 	p.logger.Info("start parser.InitSources")
 
-	ctx, cancel := chromedp.NewContext(context.Background())
+	ctx, cancel := chromedp.NewContext(ctx)
 	defer cancel()
 
 	url := os.Getenv("ENTRY_PAGE")
@@ -29,7 +31,7 @@ func (p *Parser) InitSources() error {
 	p.logger.Info("open browser with chromedp")
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
-		chromedp.Sleep(5*time.Second),
+		chromedp.Sleep(ClickTimeOut*time.Second),
 	); err != nil {
 		p.logger.Error("failed to get entry page")
 

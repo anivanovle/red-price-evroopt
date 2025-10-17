@@ -11,7 +11,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func (n *Notifier) HandleMessage(ctx context.Context, message tgbotapi.Message) {
+func (n *Notifier) HandleMessage(ctx context.Context, message *tgbotapi.Message, markup tgbotapi.ReplyKeyboardMarkup) {
 	n.logger.Info("start Notifier.HandleMessage")
 	select {
 	case <-ctx.Done():
@@ -23,34 +23,41 @@ func (n *Notifier) HandleMessage(ctx context.Context, message tgbotapi.Message) 
 	length := utf8.RuneCountInString(message.Text)
 	if length < 3 {
 		msg := tgbotapi.NewMessage(message.From.ID, "🔍 Введите хотя бы 3 символа для поиска")
+		msg.ReplyMarkup = markup
 		n.Bot.Send(msg)
 	} else {
 		n.logger.Info("message text", message.Text, "message from", "chatId", message.From)
+		n.mu.RLock()
 		_, ok := n.CategoriesMap[message.Text]
+		n.mu.RUnlock()
 		if !ok {
 			n.logger.Info("get products by title")
-			posts, err := n.ProductsByTitle(ctx, message)
+			posts, err := n.ProductsByTitle(ctx, *message)
 			if err != nil {
 				msg := tgbotapi.NewMessage(message.From.ID, "🔍 Товаров с таким названием не существует")
 				msg.ParseMode = "MarkdownV2"
+				msg.ReplyMarkup = markup
 				n.Bot.Send(msg)
 			} else {
 				post := strings.Join(posts, "\n\n\n")
 				msg := tgbotapi.NewMessage(message.From.ID, post)
 				msg.ParseMode = "MarkdownV2"
+				msg.ReplyMarkup = markup
 				n.Bot.Send(msg)
 			}
 
 		} else {
 			n.logger.Info("get products by category")
-			posts, err := n.ProductsByCategory(ctx, message)
+			posts, err := n.ProductsByCategory(ctx, *message)
 			if err != nil {
 				msg := tgbotapi.NewMessage(message.From.ID, "🔍 Товаров с такой категорией не существует")
+				msg.ReplyMarkup = markup
 				n.Bot.Send(msg)
 			}
 			post := strings.Join(posts, "\n\n\n")
 			msg := tgbotapi.NewMessage(message.From.ID, post)
 			msg.ParseMode = "MarkdownV2"
+			msg.ReplyMarkup = markup
 			n.Bot.Send(msg)
 		}
 	}
